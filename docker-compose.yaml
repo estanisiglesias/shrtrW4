@@ -1,0 +1,82 @@
+version: '3'
+
+services:
+  mariadb:
+    image: mariadb:10.3
+    ports:
+      - '3306:3306'
+    volumes:
+      - ${PWD}/data/mariadb:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: 'root'
+      MYSQL_DATABASE: 'shrtdb'
+      MYSQL_USER: 'admin'
+      MYSQL_PASSWORD: 'supersecret'
+  monolith:
+    build:
+      context: monolith
+      dockerfile: Dockerfile_debug
+    depends_on:
+      - mariadb
+    environment:
+      SPRING_DATASOURCE_URL: 'jdbc:mariadb://mariadb:3306/shrtdb'
+    command: java -Djava.security.egd=file:/dev/./urandom -jar /app/target/shrtr-0.0.1-SNAPSHOT.jar
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 1m30s
+      timeout: 10s
+      retries: 3
+
+  tests:
+    build:
+      context: e2e-tests
+      dockerfile: Dockerfile
+    depends_on:
+      - monolith
+    environment:
+      BASE_URL: 'http://monolith:8080'
+  zookeeper:
+    image: zookeeper:3.4.9
+    hostname: zoo1
+    ports:
+      - "2181:2181"
+    environment:
+      ZOO_MY_ID: 1
+      ZOO_PORT: 2181
+      ZOO_SERVERS: server.1=zookeeper:2888:3888
+  kafka:
+    image: confluentinc/cp-kafka:6.1.1
+    ports:
+      - "9092:9092"
+      - "9999:9999"
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: LISTENER_DOCKER_INTERNAL://kafka:19092,LISTENER_DOCKER_EXTERNAL://${DOCKER_HOST_IP:-127.0.0.1}:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: LISTENER_DOCKER_INTERNAL:PLAINTEXT,LISTENER_DOCKER_EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: LISTENER_DOCKER_INTERNAL
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_BROKER_ID: 1
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_JMX_PORT: 9999
+      KAFKA_JMX_HOSTNAME: ${DOCKER_HOST_IP:-127.0.0.1}
+    depends_on:
+      - zookeeper
+    healthcheck:
+      test: [ "CMD", "kafka-topics", "--bootstrap-server", "127.0.0.1:9092", "--list" ]
+      interval: 1s
+      timeout: 10s
+      retries: 15
+  kafka-setup:
+    image: confluentinc/cp-kafka:6.1.1
+    hostname: kafka-setup
+    container_name: kafka-setup
+    command: "
+      bash -c 'cub kafka-ready -b kafka:19092 1 120 && \
+      kafka-topics --create --zookeeper zookeeper:2181 --partitions 4 --replication-factor 1 --topic user-registered'"
+    # add as many commands as we need
+    environment:
+      KAFKA_BROKER_ID: ignored
+      KAFKA_ZOOKEEPER_CONNECT: ignored
+
