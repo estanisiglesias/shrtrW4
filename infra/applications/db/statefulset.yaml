@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb-deployment
+  labels:
+    component: mariadb-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: mariadb-deployment
+  serviceName: mariadb-service
+  template:
+    metadata:
+      labels:
+        component: mariadb-deployment
+    spec:
+      containers:
+        - name: mariadb-deployment
+          image: mariadb:10.3
+          ports:
+            - containerPort: 3306
+              name: db-port
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_DATABASE
+              value: 'shrtdb'
+            - name: MYSQL_USER
+              value: 'admin'
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: MYSQL_PASSWORD
+          volumeMounts:
+            - name: mariadb-data
+              mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: mariadb-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
